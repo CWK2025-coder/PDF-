@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企業級 PDF 表單編輯器 (V24 滿版無框與小字體優化版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        :root {
+            --brand-color: #0f172a; --brand-hover: #334155; --accent: #3b82f6; --accent-hover: #2563eb;
+            --bg-workspace: #e2e8f0; --surface: #ffffff; --border-light: #e2e8f0;
+            --text-primary: #0f172a; --text-secondary: #64748b; --danger: #ef4444;
+            --radius-md: 8px; --radius-lg: 12px; --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-pdf: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { background: var(--surface); color: var(--text-primary); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        .topbar { background: var(--surface); border-bottom: 1px solid var(--border-light); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; z-index: 100; box-shadow: var(--shadow-sm); }
+        .logo-area { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; color: var(--brand-color); }
+        .action-area { display: flex; gap: 12px; align-items: center; }
+
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; background: transparent; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+        .btn-outline { border-color: var(--border-light); background: var(--surface); color: var(--text-primary); }
+        .btn-outline:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; }
+        .btn-primary { background: var(--brand-color); color: white; }
+        .btn-primary:hover:not(:disabled) { background: var(--brand-hover); box-shadow: var(--shadow-sm); }
+        .btn-accent { background: var(--accent); color: white; }
+        .btn-accent:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-sm); }
+        .btn-ghost { color: var(--text-secondary); padding: 6px; border-radius: 6px; }
+        .btn-ghost:hover:not(:disabled) { background: #f1f5f9; color: var(--text-primary); }
+
+        .upload-wrap { position: relative; display: inline-block; }
+        .upload-wrap input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+        .workspace { display: flex; flex: 1; overflow: hidden; background: var(--bg-workspace); }
+        .canvas-area { flex: 1; overflow: auto; padding: 40px; display: flex; justify-content: center; align-items: flex-start; outline: none; }
+        #canvas-container { position: relative; background: white; box-shadow: var(--shadow-pdf); border-radius: 4px; }
+        canvas { display: block; border-radius: 4px; }
+
+        .sidebar { width: 340px; background: var(--surface); border-left: 1px solid var(--border-light); display: flex; flex-direction: column; z-index: 10; }
+        .sidebar-scroll { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+        
+        .panel-section { display: flex; flex-direction: column; gap: 12px; }
+        .section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+        .control-card { background: white; border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px; }
+        .control-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-primary); }
+        
+        select, input[type="number"] { border: 1px solid var(--border-light); border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; background: #f8fafc; color: var(--text-primary); }
+
+        .field-rect {
+            position: absolute; box-sizing: border-box; z-index: 5; border-radius: 2px;
+            background: rgba(255, 255, 255, 0.3); border: 1px solid transparent; transition: border-color 0.15s;
+        }
+        .field-rect:hover { border: 1px dashed #94a3b8; background: rgba(255, 255, 255, 0.7); }
+        .field-rect.active { 
+            border: 1px solid var(--accent); background: #ffffff; z-index: 10; 
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15); 
+        }
+
+        #canvas-container.show-borders .field-rect { border: 1px solid #3b82f6 !important; background: rgba(59, 130, 246, 0.05); }
+
+        .field-rect textarea {
+            width: 100%; height: 100%; background: transparent; border: none; outline: none;
+            padding: 1px 3px; color: var(--text-primary); font-family: inherit;
+            resize: none; overflow: hidden; white-space: pre-wrap; word-wrap: break-word;
+            line-height: 1.1; display: flex; align-items: center; justify-content: center;
+        }
+        .field-rect textarea::placeholder { opacity: 0; }
+        .field-rect:hover textarea::placeholder, .field-rect.active textarea::placeholder { opacity: 1; color: #cbd5e1; }
+
+        .field-rect.checkbox-type { display: flex; align-items: center; justify-content: center; cursor: pointer; background: transparent; }
+        .field-rect.checkbox-type input[type="checkbox"] { width: 100%; height: 100%; cursor: pointer; accent-color: var(--accent); margin: 0; }
+
+        .resize-handle {
+            position: absolute; right: 0; bottom: 0; width: 8px; height: 8px;
+            background: var(--accent); cursor: se-resize; display: none; border-bottom-right-radius: 2px;
+        }
+        .field-rect.active .resize-handle { display: block; }
+
+        .floating-toolbar {
+            position: absolute; background: #1e293b; color: white; border-radius: 8px;
+            padding: 4px; display: flex; gap: 4px; z-index: 1000;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            transform: translateY(calc(-100% - 10px));
+            opacity: 0; pointer-events: none; transition: opacity 0.2s;
+            align-items: center;
+        }
+        .floating-toolbar.visible { opacity: 1; pointer-events: auto; }
+        .floating-toolbar::after {
+            content: ''; position: absolute; bottom: -5px; left: 50%;
+            transform: translateX(-50%); border-width: 5px 5px 0;
+            border-style: solid; border-color: #1e293b transparent transparent transparent;
+        }
+        .ft-btn { background: transparent; border: none; color: #cbd5e1; padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .ft-btn:hover { background: #334155; color: white; }
+        .ft-btn.active { background: var(--accent); color: white; }
+        .ft-divider { width: 1px; background: #475569; margin: 0 4px; height: 20px; }
+        .multi-only { display: none; }
+
+        .shortcut-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-top: 8px; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1; }
+        .shortcut-hint span { color: var(--accent); font-weight: bold; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="logo-area"><span class="material-icons" style="color: var(--accent);">description</span> 企業表單配置工具 (V24 滿版無框與小字體優化版)</div>
+    <div class="action-area">
+        <div class="page-controls" style="display: flex; align-items: center; gap: 8px; margin-right: 16px; border-right: 1px solid var(--border-light); padding-right: 24px;">
+            <button id="prevPage" class="btn btn-ghost" disabled><span class="material-icons">chevron_left</span></button>
+            <span id="pageIndicator" style="font-size: 13px; font-weight: 500; min-width: 40px; text-align: center;">0 / 0</span>
+            <button id="nextPage" class="btn btn-ghost" disabled><span class="material-icons">chevron_right</span></button>
+        </div>
+        <div class="upload-wrap">
+            <button class="btn btn-outline"><span class="material-icons" style="font-size:18px;">upload_file</span> 載入 PDF (保留舊設定)</button>
+            <input type="file" id="upload" accept=".pdf">
+        </div>
+        <button id="savePdfBtn" class="btn btn-primary" disabled><span class="material-icons" style="font-size:18px;">download</span> 匯出給客戶填寫</button>
+    </div>
+</div>
+
+<div class="workspace" tabindex="0" id="workspaceArea">
+    <div class="canvas-area">
+        <div id="canvas-container">
+            <canvas id="pdf-canvas"></canvas>
+            
+            <div id="floatingToolbar" class="floating-toolbar">
+                <button class="ft-btn align-btn single-only" data-align="left" title="文字靠左"><span class="material-icons" style="font-size:18px;">format_align_left</span></button>
+                <button class="ft-btn align-btn single-only" data-align="center" title="文字置中"><span class="material-icons" style="font-size:18px;">format_align_center</span></button>
+                <button class="ft-btn align-btn single-only" data-align="right" title="文字靠右"><span class="material-icons" style="font-size:18px;">format_align_right</span></button>
+                
+                <div class="ft-divider multi-only"></div>
+                <button class="ft-btn multi-only" id="ftAlignLeft" title="方格靠左對齊"><span class="material-icons" style="font-size:18px;">align_horizontal_left</span></button>
+                <button class="ft-btn multi-only" id="ftAlignRight" title="方格靠右對齊"><span class="material-icons" style="font-size:18px;">align_horizontal_right</span></button>
+                <button class="ft-btn multi-only" id="ftAlignTop" title="方格靠上對齊"><span class="material-icons" style="font-size:18px;">align_vertical_top</span></button>
+                <button class="ft-btn multi-only" id="ftAlignBottom" title="方格靠下對齊"><span class="material-icons" style="font-size:18px;">align_vertical_bottom</span></button>
+
+                <div class="ft-divider"></div>
+                <button class="ft-btn" id="ftCloneBtn" title="複製 (Ctrl+C)"><span class="material-icons" style="font-size:18px;">content_copy</span></button>
+                <button class="ft-btn" id="ftDeleteBtn" style="color: #ef4444;" title="刪除 (Delete)"><span class="material-icons" style="font-size:18px;">delete</span></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-scroll">
+            <div class="panel-section">
+                <div class="section-header"><span class="material-icons" style="font-size:16px;">psychology</span> 智慧佈局偵測</div>
+                <div class="control-card">
+                    <div id="statusText" style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">請上載 PDF 開始編輯。</div>
+                    
+                    <div class="control-row" style="margin-top: 4px; border-top: 1px dashed var(--border-light); padding-top: 12px;">
+                        <label title="拉大可過濾掉字體間隙的錯誤方塊">過濾雜訊 (最小尺寸)</label>
+                        <input type="number" id="minCellSize" value="24" min="10" max="60" style="width: 70px; text-align: center;">
+                    </div>
+
+                    <button id="autoDetectBtn" class="btn btn-accent" style="width: 100%; margin-top: 8px;" disabled>
+                        <span class="material-icons" style="font-size:18px;">document_scanner</span> 一鍵掃描空白處
+                    </button>
+                </div>
+            </div>
+
+            <button id="toggleBordersBtn" class="btn btn-accent" style="width: 100%; margin-top: 8px; box-shadow: var(--shadow-sm);">
+                <span class="material-icons" style="font-size:16px;">visibility</span> 開啟全域方格檢視
+            </button>
+
+            <div class="panel-section" id="prop-section" style="opacity: 0.5; pointer-events: none;">
+                <div class="section-header"><span class="material-icons" style="font-size:16px;">tune</span> 屬性設定</div>
+                <div class="control-card">
+                    <div class="control-row" id="fontSizeRow">
+                        <label>字體大小</label>
+                        <!-- 預設字體大小調降為 9 -->
+                        <input type="number" id="fieldFontSize" value="9" min="6" max="24" style="width: 70px; text-align: center;">
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 4px;">
+                        <button id="applyFontAllBtn" class="btn btn-outline" style="flex:1; border-color: var(--accent); color: var(--accent);">強制套用全部字體大小</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section" style="flex:1;">
+                <div class="section-header"><span class="material-icons" style="font-size:16px;">format_list_bulleted</span> 操作提示與快捷鍵</div>
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <button id="addFieldBtn" class="btn btn-outline" style="flex: 1;" disabled>+ 新增文字</button>
+                    <button id="addCheckboxBtn" class="btn btn-outline" style="flex: 1;" disabled>+ 新增打勾</button>
+                </div>
+                <div class="shortcut-hint">
+                    ⌨️ <span>Ctrl + Z / Y</span>：撤回 / 重做<br>
+                    🖱️ <b>點擊方格</b>：僅供排版參考，實際請讓客戶在 PDF 填寫<br>
+                    🖐️ <span>按住 Ctrl + 拖曳</span>：移動方格<br>
+                    🗂️ <span>按住 Shift + 點擊</span>：多重選取對齊
+                </div>
+                <button id="clearFieldsBtn" class="btn btn-outline" style="color: var(--danger); width: 100%; margin-top: 12px;" disabled>清空目前頁面欄位</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const elements = {
+        container: document.getElementById('canvas-container'), canvas: document.getElementById('pdf-canvas'),
+        upload: document.getElementById('upload'), autoBtn: document.getElementById('autoDetectBtn'),
+        saveBtn: document.getElementById('savePdfBtn'), clearBtn: document.getElementById('clearFieldsBtn'),
+        addBtn: document.getElementById('addFieldBtn'), addCheckboxBtn: document.getElementById('addCheckboxBtn'),
+        status: document.getElementById('statusText'), propSection: document.getElementById('prop-section'), 
+        toggleBordersBtn: document.getElementById('toggleBordersBtn'), floatingToolbar: document.getElementById('floatingToolbar'), 
+        workspaceArea: document.getElementById('workspaceArea'), minCellSize: document.getElementById('minCellSize')
+    };
+    const ctx = elements.canvas.getContext('2d', { willReadFrequently: true });
+    
+    let pdfData = { pdfBytes: null, pdfDoc: null, currentPage: 1, scale: 1.5, fields: [], selectedIds: [] };
+    let domElements = [];
+    let customClipboard = []; 
+
+    let undoStack = [];
+    let redoStack = [];
+
+    function saveState() {
+        undoStack.push(JSON.stringify(pdfData.fields));
+        if (undoStack.length > 40) undoStack.shift();
+        redoStack = [];
+    }
+
+    elements.upload.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const header = new Uint8Array(arrayBuffer.slice(0, 5));
+            if (String.fromCharCode(...header) !== '%PDF-') { alert('這不是有效的 PDF 檔案！'); return; }
+            
+            pdfData.pdfBytes = new Uint8Array(arrayBuffer);
+            pdfData.pdfDoc = await pdfjsLib.getDocument({ data: pdfData.pdfBytes.slice() }).promise;
+            pdfData.currentPage = 1; pdfData.fields = []; pdfData.selectedIds = []; customClipboard = [];
+            undoStack = []; redoStack = [];
+            
+            elements.status.innerHTML = "⏳ 正在分析 PDF 舊有設定...";
+            
+            let oldFieldsCount = 0;
+            for (let p = 1; p <= pdfData.pdfDoc.numPages; p++) {
+                const page = await pdfData.pdfDoc.getPage(p);
+                const annotations = await page.getAnnotations();
+                annotations.forEach(annot => {
+                    if (annot.subtype === 'Widget' && (annot.fieldType === 'Tx' || annot.fieldType === 'Btn')) {
+                        const rect = annot.rect;
+                        const pageHeight = page.view[3];
+                        let alignText = 'center';
+                        if (annot.textAlignment === 0) alignText = 'left';
+                        if (annot.textAlignment === 2) alignText = 'right';
+
+                        pdfData.fields.push({
+                            id: 'imported_' + Date.now() + '_' + Math.random(),
+                            type: annot.fieldType === 'Tx' ? 'text' : 'checkbox',
+                            page: p,
+                            x: rect[0] * pdfData.scale,
+                            y: (pageHeight - rect[3]) * pdfData.scale,
+                            w: (rect[2] - rect[0]) * pdfData.scale,
+                            h: (rect[3] - rect[1]) * pdfData.scale,
+                            value: annot.fieldValue || (annot.buttonValue ? true : false),
+                            alignment: alignText,
+                            fontSize: 9 // 預設降為 9
+                        });
+                        oldFieldsCount++;
+                    }
+                });
+            }
+
+            const pdfDocLib = await PDFLib.PDFDocument.load(pdfData.pdfBytes.slice());
+            const form = pdfDocLib.getForm();
+            const existingFields = form.getFields();
+            existingFields.forEach(f => form.removeField(f));
+            pdfData.pdfBytes = await pdfDocLib.save(); 
+
+            pdfData.pdfDoc = await pdfjsLib.getDocument({ data: pdfData.pdfBytes.slice() }).promise;
+
+            ['autoBtn', 'saveBtn', 'clearBtn', 'addBtn', 'addCheckboxBtn'].forEach(id => elements[id].disabled = false);
+            document.getElementById('prevPage').disabled = false; document.getElementById('nextPage').disabled = false;
+            
+            await renderCurrentPage();
+            saveState();
+            elements.status.innerHTML = `✅ 載入成功！共 ${pdfData.pdfDoc.numPages} 頁。${oldFieldsCount > 0 ? `已恢復 ${oldFieldsCount} 個舊設定。` : ''}`;
+        } catch (err) { alert('載入 PDF 失敗：' + err.message); }
+    });
+
+    async function renderCurrentPage() {
+        if (!pdfData.pdfDoc) return;
+        const page = await pdfData.pdfDoc.getPage(pdfData.currentPage);
+        const viewport = page.getViewport({ scale: pdfData.scale });
+        elements.canvas.width = viewport.width; elements.canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        document.getElementById('pageIndicator').textContent = `${pdfData.currentPage} / ${pdfData.pdfDoc.numPages}`;
+        fullRender();
+    }
+
+    document.getElementById('prevPage').onclick = () => { if(pdfData.currentPage > 1) { pdfData.currentPage--; renderCurrentPage(); } };
+    document.getElementById('nextPage').onclick = () => { if(pdfData.currentPage < pdfData.pdfDoc.numPages) { pdfData.currentPage++; renderCurrentPage(); } };
+
+    elements.autoBtn.onclick = async () => {
+        saveState();
+        elements.status.innerHTML = "⏳ 正在尋找空白網格...請稍候";
+        elements.autoBtn.disabled = true;
+        
+        setTimeout(async () => {
+            let totalAdded = 0;
+            const minSize = parseInt(elements.minCellSize.value) || 24; 
+            
+            for (let p = 1; p <= pdfData.pdfDoc.numPages; p++) {
+                const page = await pdfData.pdfDoc.getPage(p);
+                const viewport = page.getViewport({ scale: pdfData.scale });
+                const textContent = await page.getTextContent();
+                
+                const textBoxes = textContent.items.map(item => {
+                    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                    const fontH = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+                    return { text: item.str.trim(), x: tx[4], y: tx[5] - fontH, w: item.width * viewport.scale, h: fontH * 1.2 };
+                }).filter(t => t.text.length > 0);
+
+                const offCanvas = document.createElement('canvas');
+                offCanvas.width = viewport.width; offCanvas.height = viewport.height;
+                const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+                await page.render({ canvasContext: offCtx, viewport }).promise;
+
+                const cells = detectGridCellsHighPrecision(offCanvas.width, offCanvas.height, offCtx);
+
+                const addField = (x, y, w, h, idSuffix, type='text') => {
+                    const isOverlap = pdfData.fields.some(f => f.page === p && Math.abs(f.x - x) < 5 && Math.abs(f.y - y) < 5);
+                    if (isOverlap) return;
+
+                    pdfData.fields.push({
+                        id: `f_p${p}_${Date.now()}_${idSuffix}`, type, page: p,
+                        x, y, w, h, value: type === 'checkbox' ? false : '', 
+                        fontSize: 9, alignment: 'center' // 預設字體改為 9
+                    });
+                    totalAdded++;
+                };
+
+                cells.forEach((cell, idx) => {
+                    if (cell.w < minSize || cell.h < minSize) return; 
+
+                    if (cell.w <= 40 && cell.h <= 40 && Math.abs(cell.w - cell.h) < 15) {
+                        addField(cell.x, cell.y, cell.w, cell.h, idx, 'checkbox'); 
+                        return;
+                    }
+
+                    const insideTexts = textBoxes.filter(t => t.x >= cell.x - 5 && (t.x + t.w) <= (cell.x + cell.w + 5) && t.y >= cell.y - 5 && (t.y + t.h) <= (cell.y + cell.h + 5));
+                    
+                    if (insideTexts.length === 0) {
+                        addField(cell.x + 2, cell.y + 2, cell.w - 4, cell.h - 4, idx, 'text');
+                    } else {
+                        let maxTextRight = cell.x;
+                        insideTexts.forEach(t => { if (t.x + t.w > maxTextRight) maxTextRight = t.x + t.w; });
+                        const remainingWidth = (cell.x + cell.w) - maxTextRight;
+                        if (remainingWidth > 20) {
+                            addField(maxTextRight + 2, cell.y + 2, remainingWidth - 4, cell.h - 4, idx + '_r', 'text');
+                        }
+                    }
+                });
+            }
+            elements.status.innerHTML = `✅ 掃描完成！以大於 ${minSize}px 條件新增了 ${totalAdded} 個有效區域。`;
+            elements.autoBtn.disabled = false;
+            fullRender();
+        }, 100);
+    };
+
+    function detectGridCellsHighPrecision(w, h, context) {
+        const imgData = context.getImageData(0, 0, w, h).data;
+        const threshold = 220; 
+        const hSegments = [], vSegments = [];
+        
+        for (let y = 0; y < h; y++) {
+            let startX = -1;
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                if (imgData[i] < threshold && imgData[i+3] > 50) { if (startX === -1) startX = x; }
+                else if (startX !== -1) { if (x - startX > 20) hSegments.push({ y, x1: startX, x2: x }); startX = -1; }
+            }
+            if (startX !== -1 && w - startX > 20) hSegments.push({ y, x1: startX, x2: w });
+        }
+
+        for (let x = 0; x < w; x++) {
+            let startY = -1;
+            for (let y = 0; y < h; y++) {
+                const i = (y * w + x) * 4;
+                if (imgData[i] < threshold && imgData[i+3] > 50) { if (startY === -1) startY = y; }
+                else if (startY !== -1) { if (y - startY > 20) vSegments.push({ x, y1: startY, y2: y }); startY = -1; }
+            }
+            if (startY !== -1 && h - startY > 20) vSegments.push({ x, y1: startY, y2: h });
+        }
+
+        const hLines = [], vLines = [];
+        hSegments.forEach(seg => {
+            const existing = hLines.find(l => Math.abs(l.y - seg.y) <= 4 && Math.max(l.x1, seg.x1) <= Math.min(l.x2, seg.x2));
+            if (existing) { existing.x1 = Math.min(existing.x1, seg.x1); existing.x2 = Math.max(existing.x2, seg.x2); existing.y = (existing.y + seg.y) / 2; }
+            else { hLines.push({ ...seg }); }
+        });
+        vSegments.forEach(seg => {
+            const existing = vLines.find(l => Math.abs(l.x - seg.x) <= 4 && Math.max(l.y1, seg.y1) <= Math.min(l.y2, seg.y2));
+            if (existing) { existing.y1 = Math.min(existing.y1, seg.y1); existing.y2 = Math.max(existing.y2, seg.y2); existing.x = (existing.x + seg.x) / 2; }
+            else { vLines.push({ ...seg }); }
+        });
+
+        const cells = [];
+        hLines.sort((a, b) => a.y - b.y); vLines.sort((a, b) => a.x - b.x);
+
+        for (let i = 0; i < hLines.length; i++) {
+            const top = hLines[i];
+            const bottomCandidates = hLines.filter(l => l.y > top.y + 10 && l.y < top.y + 300);
+            bottomCandidates.forEach(bottom => {
+                const crossV = vLines.filter(v => v.y1 <= top.y + 10 && v.y2 >= bottom.y - 10 && v.x >= Math.max(top.x1, bottom.x1) - 10 && v.x <= Math.min(top.x2, bottom.x2) + 10);
+                for (let k = 0; k < crossV.length - 1; k++) {
+                    const w = crossV[k+1].x - crossV[k].x; const h = bottom.y - top.y;
+                    if (w > 12 && h > 12) cells.push({ x: crossV[k].x, y: top.y, w, h });
+                }
+            });
+        }
+        return cells.filter((c, index, self) => index === self.findIndex(t => Math.abs(t.x-c.x)<5 && Math.abs(t.y-c.y)<5));
+    }
+
+    function fullRender() {
+        domElements.forEach(el => el.remove()); domElements = [];
+        pdfData.fields.filter(f => f.page === pdfData.currentPage).forEach(f => {
+            const div = createFieldDOM(f); elements.container.appendChild(div); domElements.push(div);
+        });
+        updateSelectionHighlight(); 
+    }
+
+    function createFieldDOM(field) {
+        const div = document.createElement('div');
+        div.className = `field-rect ${field.type === 'checkbox' ? 'checkbox-type' : ''}`;
+        div.setAttribute('data-field-id', field.id);
+        applyFieldStyle(div, field);
+
+        if (field.type === 'checkbox') {
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!field.value;
+            cb.addEventListener('change', (e) => { 
+                saveState();
+                field.value = e.target.checked; 
+                e.stopPropagation(); 
+            });
+            div.appendChild(cb);
+        } else {
+            const input = document.createElement('textarea'); 
+            input.value = field.value || '';
+            input.placeholder = '點擊輸入...'; 
+            input.style.textAlign = field.alignment || 'center';
+            
+            const adjustFontSize = () => {
+                let maxSz = field.fontSize || 9;
+                input.style.fontSize = maxSz + 'px';
+                while ((input.scrollHeight > input.clientHeight || input.scrollWidth > input.clientWidth) && maxSz > 6) {
+                    maxSz--;
+                    input.style.fontSize = maxSz + 'px';
+                }
+            };
+
+            input.addEventListener('input', (e) => { 
+                field.value = e.target.value; 
+                adjustFontSize();
+            });
+            
+            div.appendChild(input);
+            setTimeout(adjustFontSize, 0);
+        }
+
+        const handle = document.createElement('div'); handle.className = 'resize-handle'; div.appendChild(handle);
+
+        div.addEventListener('mousedown', (e) => {
+            const isCtrl = e.ctrlKey || e.metaKey;
+            const isShift = e.shiftKey;
+
+            if (e.target.tagName === 'TEXTAREA' && !isCtrl && !isShift) {
+                if (!pdfData.selectedIds.includes(field.id)) { selectField(field.id, false); }
+                return;
+            }
+
+            e.preventDefault();
+
+            if (e.target === handle) { 
+                e.stopPropagation(); 
+                selectField(field.id, false); 
+                saveState();
+                initResize(e, field, div); 
+                return; 
+            }
+
+            if (isShift) { selectField(field.id, true); return; }
+
+            if (!pdfData.selectedIds.includes(field.id)) { selectField(field.id, false); }
+            saveState();
+            initDrag(e, pdfData.selectedIds);
+        });
+        return div;
+    }
+
+    function applyFieldStyle(div, field) { div.style.left = field.x + 'px'; div.style.top = field.y + 'px'; div.style.width = field.w + 'px'; div.style.height = field.h + 'px'; }
+    
+    function selectField(id, isMulti = false) { 
+        if (isMulti) {
+            if (pdfData.selectedIds.includes(id)) pdfData.selectedIds = pdfData.selectedIds.filter(x => x !== id);
+            else pdfData.selectedIds.push(id);
+        } else {
+            pdfData.selectedIds = id ? [id] : [];
+        }
+        updateSelectionHighlight(); updateFloatingToolbar();
+    }
+
+    function updateSelectionHighlight() {
+        domElements.forEach(div => {
+            if (pdfData.selectedIds.includes(div.getAttribute('data-field-id'))) div.classList.add('active');
+            else div.classList.remove('active');
+        });
+        elements.propSection.style.opacity = pdfData.selectedIds.length > 0 ? '1' : '0.4';
+        elements.propSection.style.pointerEvents = pdfData.selectedIds.length > 0 ? 'auto' : 'none';
+        
+        if (pdfData.selectedIds.length === 1) {
+            const selected = pdfData.fields.find(f => f.id === pdfData.selectedIds[0]);
+            document.getElementById('fontSizeRow').style.display = selected && selected.type === 'checkbox' ? 'none' : 'flex';
+            if (selected) document.getElementById('fieldFontSize').value = selected.fontSize || 9;
+        }
+    }
+
+    elements.workspaceArea.addEventListener('mousedown', (e) => {
+        if (e.target === elements.container || e.target === elements.canvas || e.target === elements.workspaceArea) {
+            selectField(null);
+            if(document.activeElement && document.activeElement.tagName === 'TEXTAREA') document.activeElement.blur();
+        }
+    });
+
+    function initDrag(e, ids) {
+        const startX = e.clientX, startY = e.clientY;
+        const originalPos = ids.map(id => { const f = pdfData.fields.find(x => x.id === id); return { id, x: f.x, y: f.y }; });
+
+        function onMouseMove(me) {
+            const dx = me.clientX - startX; const dy = me.clientY - startY;
+            originalPos.forEach(orig => {
+                const f = pdfData.fields.find(x => x.id === orig.id);
+                if (f) {
+                    f.x = Math.max(0, orig.x + dx); f.y = Math.max(0, orig.y + dy);
+                    const div = document.querySelector(`.field-rect[data-field-id="${f.id}"]`);
+                    if (div) applyFieldStyle(div, f);
+                }
+            });
+            updateFloatingToolbar();
+        }
+        function onMouseUp() { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); }
+        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+    }
+
+    function initResize(e, field, div) {
+        const startX = e.clientX, startY = e.clientY, origW = field.w, origH = field.h;
+        function onMouseMove(me) { 
+            field.w = Math.max(15, origW + (me.clientX - startX)); 
+            field.h = Math.max(15, origH + (me.clientY - startY)); 
+            applyFieldStyle(div, field); 
+            updateFloatingToolbar(); 
+            const textarea = div.querySelector('textarea');
+            if(textarea) {
+                let maxSz = field.fontSize || 9;
+                textarea.style.fontSize = maxSz + 'px';
+                while ((textarea.scrollHeight > textarea.clientHeight || textarea.scrollWidth > textarea.clientWidth) && maxSz > 6) {
+                    maxSz--; textarea.style.fontSize = maxSz + 'px';
+                }
+            }
+        }
+        function onMouseUp() { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); }
+        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+    }
+
+    function updateFloatingToolbar() {
+        if (pdfData.selectedIds.length === 0) { elements.floatingToolbar.classList.remove('visible'); return; }
+        
+        const field = pdfData.fields.find(f => f.id === pdfData.selectedIds[0]); if (!field) return;
+        const tbWidth = elements.floatingToolbar.offsetWidth || 250;
+        let leftPos = field.x + (field.w / 2) - (tbWidth / 2);
+        if (leftPos < 10) leftPos = 10;
+        elements.floatingToolbar.style.left = leftPos + 'px'; elements.floatingToolbar.style.top = field.y + 'px';
+        elements.floatingToolbar.classList.add('visible');
+
+        const isMulti = pdfData.selectedIds.length > 1;
+        document.querySelectorAll('.single-only').forEach(el => el.style.display = (isMulti || field.type==='checkbox') ? 'none' : 'flex');
+        document.querySelectorAll('.multi-only').forEach(el => el.style.display = isMulti ? 'flex' : 'none');
+
+        if (!isMulti && field.type === 'text') {
+            document.querySelectorAll('.align-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-align') === (field.alignment || 'center')) btn.classList.add('active');
+            });
+        }
+    }
+
+    document.querySelectorAll('.align-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation(); const align = btn.getAttribute('data-align'); const field = pdfData.fields.find(f => f.id === pdfData.selectedIds[0]);
+            if (field && field.type === 'text') { 
+                saveState();
+                field.alignment = align; 
+                const div = document.querySelector(`.field-rect[data-field-id="${field.id}"] textarea`); 
+                if (div) div.style.textAlign = align; 
+                updateFloatingToolbar(); 
+            }
+        };
+    });
+
+    const alignSelected = (prop, func) => {
+        if(pdfData.selectedIds.length < 2) return;
+        saveState();
+        const selected = pdfData.fields.filter(f => pdfData.selectedIds.includes(f.id));
+        const targetVal = func(...selected.map(f => f[prop]));
+        selected.forEach(f => f[prop] = targetVal);
+        fullRender();
+    };
+    document.getElementById('ftAlignLeft').onclick = (e) => { e.stopPropagation(); alignSelected('x', Math.min); };
+    document.getElementById('ftAlignTop').onclick = (e) => { e.stopPropagation(); alignSelected('y', Math.min); };
+    document.getElementById('ftAlignRight').onclick = (e) => { e.stopPropagation();
+        saveState();
+        const selected = pdfData.fields.filter(f => pdfData.selectedIds.includes(f.id));
+        const maxRight = Math.max(...selected.map(f => f.x + f.w));
+        selected.forEach(f => f.x = maxRight - f.w); fullRender();
+    };
+    document.getElementById('ftAlignBottom').onclick = (e) => { e.stopPropagation();
+        saveState();
+        const selected = pdfData.fields.filter(f => pdfData.selectedIds.includes(f.id));
+        const maxBottom = Math.max(...selected.map(f => f.y + f.h));
+        selected.forEach(f => f.y = maxBottom - f.h); fullRender();
+    };
+
+    document.getElementById('ftDeleteBtn').onclick = (e) => { e.stopPropagation(); deleteSelectedField(); };
+    document.getElementById('ftCloneBtn').onclick = (e) => { e.stopPropagation(); cloneSelectedField(); };
+
+    document.getElementById('fieldFontSize').oninput = function(e) { 
+        if (pdfData.selectedIds.length === 1) {
+            saveState();
+            const f = pdfData.fields.find(x => x.id === pdfData.selectedIds[0]); 
+            if (f) { 
+                const newSize = parseInt(e.target.value) || 9; 
+                f.fontSize = newSize; 
+                fullRender();
+            } 
+        }
+    };
+    
+    document.getElementById('applyFontAllBtn').onclick = () => { 
+        if (pdfData.selectedIds.length === 0) { alert('請先點選一個文字方塊作為標準！'); return; } 
+        saveState();
+        const selected = pdfData.fields.find(x => x.id === pdfData.selectedIds[0]); 
+        const size = selected.fontSize || 9; 
+        pdfData.fields.forEach(f => { if (f.type === 'text') f.fontSize = size; }); 
+        fullRender(); alert(`已全部套用字體大小：${size}px`); 
+    };
+
+    elements.clearBtn.onclick = () => { if (confirm('確定清空此頁？')) { saveState(); pdfData.fields = pdfData.fields.filter(f => f.page !== pdfData.currentPage); pdfData.selectedIds = []; fullRender(); } };
+    elements.addBtn.onclick = () => { saveState(); const newId = 'f_m_' + Date.now(); pdfData.fields.push({ id: newId, type: 'text', page: pdfData.currentPage, x: 100, y: 100, w: 150, h: 24, fontSize: 9, alignment: 'center', value: '' }); fullRender(); selectField(newId); };
+    elements.addCheckboxBtn.onclick = () => { saveState(); const newId = 'f_c_' + Date.now(); pdfData.fields.push({ id: newId, type: 'checkbox', page: pdfData.currentPage, x: 100, y: 100, w: 20, h: 20, value: false }); fullRender(); selectField(newId); };
+    
+    let showBorders = false;
+    elements.toggleBordersBtn.onclick = () => { showBorders = !showBorders; if (showBorders) { elements.container.classList.add('show-borders'); elements.toggleBordersBtn.innerHTML = '<span class="material-icons" style="font-size:16px;">visibility_off</span> 關閉全域方格檢視'; } else { elements.container.classList.remove('show-borders'); elements.toggleBordersBtn.innerHTML = '<span class="material-icons" style="font-size:16px;">visibility</span> 開啟全域方格檢視'; } };
+
+    function cloneSelectedField() { 
+        if (pdfData.selectedIds.length === 0) return;
+        saveState();
+        const newIds = [];
+        pdfData.selectedIds.forEach(id => {
+            const srcField = pdfData.fields.find(f => f.id === id); 
+            if (srcField) { 
+                const newId = 'f_c_' + Date.now() + Math.random(); 
+                pdfData.fields.push({ ...srcField, id: newId, page: pdfData.currentPage, x: srcField.x + 10, y: srcField.y + 10 }); 
+                newIds.push(newId);
+            } 
+        });
+        fullRender();
+        pdfData.selectedIds = newIds; updateSelectionHighlight(); updateFloatingToolbar();
+    }
+    
+    function deleteSelectedField() { 
+        if (pdfData.selectedIds.length > 0) { 
+            saveState();
+            pdfData.fields = pdfData.fields.filter(x => !pdfData.selectedIds.includes(x.id)); 
+            pdfData.selectedIds = []; fullRender(); updateFloatingToolbar();
+        } 
+    }
+
+    window.addEventListener('keydown', (e) => {
+        const cmdOrCtrl = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? e.metaKey : e.ctrlKey;
+        
+        if (cmdOrCtrl && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            if (undoStack.length > 0) {
+                redoStack.push(JSON.stringify(pdfData.fields));
+                pdfData.fields = JSON.parse(undoStack.pop());
+                pdfData.selectedIds = [];
+                fullRender();
+            }
+            return;
+        }
+
+        if (cmdOrCtrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+            e.preventDefault();
+            if (redoStack.length > 0) {
+                undoStack.push(JSON.stringify(pdfData.fields));
+                pdfData.fields = JSON.parse(redoStack.pop());
+                pdfData.selectedIds = [];
+                fullRender();
+            }
+            return;
+        }
+
+        if (cmdOrCtrl && e.key.toLowerCase() === 'c' && pdfData.selectedIds.length > 0) {
+            customClipboard = pdfData.fields.filter(f => pdfData.selectedIds.includes(f.id));
+        }
+        if (e.target.tagName === 'TEXTAREA' && !cmdOrCtrl) return;
+        if (cmdOrCtrl && e.key.toLowerCase() === 'v' && customClipboard.length > 0) { 
+            saveState();
+            const newIds = [];
+            customClipboard.forEach(f => {
+                const newId = 'f_v_' + Date.now() + Math.random(); 
+                pdfData.fields.push({ ...f, id: newId, page: pdfData.currentPage, x: f.x + 10, y: f.y + 10 }); 
+                newIds.push(newId);
+            });
+            fullRender(); pdfData.selectedIds = newIds; updateSelectionHighlight(); updateFloatingToolbar();
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') deleteSelectedField();
+    });
+
+    elements.saveBtn.onclick = async () => {
+        if (!pdfData.pdfBytes || pdfData.pdfBytes.length === 0) return;
+        elements.saveBtn.innerHTML = '<span class="material-icons" style="font-size:18px;">hourglass_top</span> 處理中'; elements.saveBtn.disabled = true;
+
+        try {
+            const { PDFDocument, StandardFonts, TextAlignment, PDFName, PDFBool } = PDFLib;
+            const pdfDocLib = await PDFDocument.load(pdfData.pdfBytes.slice().buffer.slice(0), { ignoreEncryption: true });
+            
+            const form = pdfDocLib.getForm();
+            
+            if (form.acroForm.dict.has(PDFName.of('XFA'))) {
+                form.acroForm.dict.delete(PDFName.of('XFA'));
+            }
+
+            form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+
+            const font = await pdfDocLib.embedFont(StandardFonts.Helvetica);
+            const pages = pdfDocLib.getPages();
+
+            pdfData.fields.forEach((f, idx) => {
+                const page = pages[f.page - 1];
+                if (!page) return;
+                const { height: pageHeight } = page.getSize();
+                
+                if (f.type === 'checkbox') {
+                    const cb = form.createCheckBox(`CB_P${f.page}_${idx}_${Date.now()}`);
+                    cb.addToPage(page, { 
+                        x: f.x / pdfData.scale, 
+                        y: pageHeight - ((f.y + f.h) / pdfData.scale), 
+                        width: f.w / pdfData.scale, 
+                        height: f.h / pdfData.scale, 
+                        borderWidth: 0 
+                    });
+                    
+                    const cbWidget = cb.acroField.getWidgets()[0];
+                    cbWidget.dict.delete(PDFName.of('BS'));     
+                    cbWidget.dict.delete(PDFName.of('Border')); 
+                    if (cbWidget.dict.has(PDFName.of('MK'))) {
+                        cbWidget.dict.delete(PDFName.of('MK')); 
+                    }
+
+                    if (f.value) cb.check();
+                } else {
+                    const tf = form.createTextField(`TF_P${f.page}_${idx}_${Date.now()}`);
+                    
+                    // 【還原完整大小】：不再調整 height 與 y，100% 填滿表格，維持藍框完整性
+                    const opts = { 
+                        x: f.x / pdfData.scale, 
+                        y: pageHeight - ((f.y + f.h) / pdfData.scale), 
+                        width: f.w / pdfData.scale, 
+                        height: f.h / pdfData.scale, 
+                        borderWidth: 0,
+                        font: font
+                    };
+                    
+                    tf.addToPage(page, opts);
+                    tf.setFontSize(f.fontSize || 9);
+                    tf.disableMultiline();
+
+                    const tfWidget = tf.acroField.getWidgets()[0];
+                    tfWidget.dict.delete(PDFName.of('BS'));     
+                    tfWidget.dict.delete(PDFName.of('Border')); 
+                    if (tfWidget.dict.has(PDFName.of('MK'))) {
+                        tfWidget.dict.delete(PDFName.of('MK')); 
+                    }
+
+                    if (f.alignment === 'center') tf.setAlignment(TextAlignment.Center); 
+                    else if (f.alignment === 'right') tf.setAlignment(TextAlignment.Right); 
+                    else tf.setAlignment(TextAlignment.Left);
+                    
+                    if (f.value) {
+                        try { tf.setText(String(f.value)); } catch(e) {}
+                    }
+                }
+            });
+
+            const outBytes = await pdfDocLib.save({ updateFieldAppearances: false });
+            
+            const blob = new Blob([outBytes], { type: 'application/pdf' });
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'form_v24_final.pdf'; link.click(); URL.revokeObjectURL(link.href);
+        } catch (err) { alert('匯出失敗：' + err.message); }
+        finally { elements.saveBtn.innerHTML = '<span class="material-icons" style="font-size:18px;">download</span> 匯出給客戶填寫'; elements.saveBtn.disabled = false; }
+    };
+</script>
+</body>
+</html>
